@@ -53,15 +53,15 @@ fi
 openssl req -new \
   -key /etc/ssl/jenkins/tls.key \
   -out /etc/ssl/jenkins/tls.csr \
-  -subj "/C=CO/ST=Valle del Cauca/L=Cali/O=Jenkins/OU=CI/CD/CN=${JENKINS_FQDN}" \
-  -addext "subjectAltName=DNS:${JENKINS_FQDN},DNS:${DOMAIN_NAME}"
+  -subj "/C=CO/ST=Valle del Cauca/L=Cali/O=Jenkins/OU=CI/CD/CN=$JENKINS_FQDN" \
+  -addext "subjectAltName=DNS:$JENKINS_FQDN,DNS:$DOMAIN_NAME"
 
 # Temporary self-signed cert so Nginx can start on 443 now (replace later with Name.com cert)
 openssl req -x509 -days 30 -sha256 \
   -key /etc/ssl/jenkins/tls.key \
   -out /etc/ssl/jenkins/tls.crt \
-  -subj "/CN=${JENKINS_FQDN}" \
-  -addext "subjectAltName=DNS:${JENKINS_FQDN},DNS:${DOMAIN_NAME}"
+  -subj "/CN=$JENKINS_FQDN" \
+  -addext "subjectAltName=DNS:$JENKINS_FQDN,DNS:$DOMAIN_NAME"
 
 # ---- Nginx reverse proxy for Jenkins ----
 cat >/etc/nginx/sites-available/jenkins <<'NGINX'
@@ -98,8 +98,8 @@ server {
 NGINX
 
 # Replace placeholders
-sed -i "s/JENKINS_FQDN/${JENKINS_FQDN}/g" /etc/nginx/sites-available/jenkins
-sed -i "s/DOMAIN_NAME/${DOMAIN_NAME}/g" /etc/nginx/sites-available/jenkins
+sed -i "s/JENKINS_FQDN/$JENKINS_FQDN/g" /etc/nginx/sites-available/jenkins
+sed -i "s/DOMAIN_NAME/$DOMAIN_NAME/g" /etc/nginx/sites-available/jenkins
 
 rm -f /etc/nginx/sites-enabled/default || true
 ln -sf /etc/nginx/sites-available/jenkins /etc/nginx/sites-enabled/jenkins
