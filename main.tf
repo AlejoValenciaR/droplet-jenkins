@@ -58,6 +58,14 @@ resource "digitalocean_record" "jenkins" {
   ttl    = 1800
 }
 
+resource "digitalocean_record" "ssl_validation" {
+  domain = digitalocean_domain.this.id
+  type   = "CNAME"
+  name   = "_e8963d90eb44d3ebd0aacea4c73eb601"
+  value  = "932cafcf0eb300aaafb633ad7742b2ad.58c6dc2133f1d48039eb3f8a4d1859f3.sectigo.com."
+  ttl    = 300
+}
+
 resource "digitalocean_firewall" "jenkins" {
   name        = "${var.droplet_name}-fw"
   droplet_ids = [digitalocean_droplet.jenkins.id]
