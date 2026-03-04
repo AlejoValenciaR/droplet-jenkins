@@ -5,7 +5,7 @@ locals {
 
 resource "digitalocean_ssh_key" "this" {
   name       = var.ssh_key_name
-  public_key = trimspace(base64decode(var.ssh_public_key_b64))
+  public_key = trimspace(file("${path.module}/keys/alejo_do_ed25519.pub"))
 }
 resource "digitalocean_droplet" "jenkins" {
   name          = var.droplet_name
