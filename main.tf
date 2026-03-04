@@ -19,8 +19,8 @@ resource "digitalocean_droplet" "jenkins" {
   tags     = ["jenkins", "terraform"]
 
   user_data = templatefile("${path.module}/user_data.sh.tpl", {
-    domain_name    = var.domain_name
-    jenkins_fqdn   = local.jenkins_fqdn
+    domain_name  = var.domain_name
+    jenkins_fqdn = local.jenkins_fqdn
   })
 }
 
