@@ -1,7 +1,15 @@
-output "droplet_ip" {
-  value = digitalocean_droplet.jenkins.ipv4_address
+output "reserved_ip" {
+  value = digitalocean_reserved_ip.jenkins.ip_address
 }
 
-output "jenkins_url" {
-  value = "http://${digitalocean_droplet.jenkins.ipv4_address}:8080"
+output "jenkins_fqdn" {
+  value = local.jenkins_fqdn
+}
+
+output "jenkins_http_url" {
+  value = "http://${local.jenkins_fqdn}/"
+}
+
+output "jenkins_https_url" {
+  value = "https://${local.jenkins_fqdn}/"
 }

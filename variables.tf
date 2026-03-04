@@ -9,7 +9,26 @@ variable "ssh_key_name" {
 
 variable "admin_ip_cidr" {
   type        = string
-  description = "Your public IP in CIDR format, for example 203.0.113.10/32"
+  description = "Your public IP in CIDR format, e.g. 181.234.140.245/32"
+}
+
+# Optional: keep DO console working by allowlisting the console IPs you observed
+variable "extra_ssh_cidrs" {
+  type        = list(string)
+  default     = []
+  description = "Extra CIDRs allowed to SSH (optional). Example: [\"162.243.190.66/32\",\"162.243.188.66/32\"]"
+}
+
+# Your real domain (WITHOUT www)
+variable "domain_name" {
+  type    = string
+  default = "jenkinsnauthsoftwareprivate.app"
+}
+
+# For Jenkins, I recommend "jenkins" (cleaner) but you can keep "www"
+variable "jenkins_subdomain" {
+  type    = string
+  default = "www"
 }
 
 variable "droplet_name" {
