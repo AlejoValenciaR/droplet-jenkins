@@ -6,9 +6,9 @@ variable "do_token" {
 variable "ssh_key_name" {
   type = string
 }
-variable "ssh_public_key" {
+variable "ssh_public_key_b64" {
   type        = string
-  description = "SSH public key content (ssh-ed25519 AAAA... or ssh-rsa AAAA...)"
+  description = "Base64-encoded SSH public key"
   sensitive   = true
 }
 variable "admin_ip_cidr" {

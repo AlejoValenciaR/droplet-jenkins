@@ -5,9 +5,8 @@ locals {
 
 resource "digitalocean_ssh_key" "this" {
   name       = var.ssh_key_name
-  public_key = var.ssh_public_key
+  public_key = trimspace(base64decode(var.ssh_public_key_b64))
 }
-
 resource "digitalocean_droplet" "jenkins" {
   name          = var.droplet_name
   region        = var.region
