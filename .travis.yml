@@ -1,0 +1,32 @@
+version: ~> 1.0
+dist: jammy
+language: minimal
+
+stages:
+  - validate
+  - deploy
+
+jobs:
+  include:
+    - stage: validate
+      script:
+        - export TF_VERSION=1.14.6
+        - curl -fsSLo terraform.zip https://releases.hashicorp.com/terraform/${TF_VERSION}/terraform_${TF_VERSION}_linux_amd64.zip
+        - unzip -o terraform.zip
+        - sudo mv terraform /usr/local/bin/terraform
+        - terraform version
+        - terraform init -backend=false
+        - terraform fmt -check
+        - terraform validate
+
+    - stage: deploy
+      if: branch = main AND type = push
+      script:
+        - export TF_VERSION=1.14.6
+        - curl -fsSLo terraform.zip https://releases.hashicorp.com/terraform/${TF_VERSION}/terraform_${TF_VERSION}_linux_amd64.zip
+        - unzip -o terraform.zip
+        - sudo mv terraform /usr/local/bin/terraform
+        - terraform version
+        - terraform init -reconfigure -backend-config=backend.hcl
+        - terraform plan
+        - terraform apply -auto-approve
