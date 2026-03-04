@@ -3,8 +3,9 @@ locals {
   jenkins_fqdn     = "${var.jenkins_subdomain}.${var.domain_name}"
 }
 
-data "digitalocean_ssh_key" "this" {
-  name = var.ssh_key_name
+resource "digitalocean_ssh_key" "this" {
+  name       = var.ssh_key_name
+  public_key = var.ssh_public_key
 }
 
 resource "digitalocean_droplet" "jenkins" {
@@ -15,7 +16,7 @@ resource "digitalocean_droplet" "jenkins" {
   monitoring    = true
   droplet_agent = true
 
-  ssh_keys = [data.digitalocean_ssh_key.this.id]
+  ssh_keys = [digitalocean_ssh_key.this.id]
   tags     = ["jenkins", "terraform"]
 
   user_data = templatefile("${path.module}/user_data.sh.tpl", {
