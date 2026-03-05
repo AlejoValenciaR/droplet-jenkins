@@ -1,6 +1,10 @@
 locals {
   ssh_source_cidrs = concat([var.admin_ip_cidr], var.extra_ssh_cidrs)
   jenkins_fqdn     = "${var.jenkins_subdomain}.${var.domain_name}"
+
+  # One-time local seed files. Keep them OUT of git.
+  seed_tls_key_b64 = fileexists("${path.module}/secrets/tls.key") ? filebase64("${path.module}/secrets/tls.key") : ""
+  seed_tls_crt_b64 = fileexists("${path.module}/secrets/tls.crt") ? filebase64("${path.module}/secrets/tls.crt") : ""
 }
 
 resource "digitalocean_ssh_key" "this" {
@@ -19,8 +23,10 @@ resource "digitalocean_droplet" "jenkins" {
   tags     = ["jenkins", "terraform"]
 
   user_data = templatefile("${path.module}/user_data.sh.tpl", {
-    domain_name  = var.domain_name
-    jenkins_fqdn = local.jenkins_fqdn
+    domain_name       = var.domain_name
+    jenkins_fqdn      = local.jenkins_fqdn
+    volume_name       = digitalocean_volume.jenkins_data.name
+    volume_mount_path = var.volume_mount_path
   })
 }
 
@@ -107,4 +113,20 @@ resource "digitalocean_firewall" "jenkins" {
     protocol              = "icmp"
     destination_addresses = ["0.0.0.0/0", "::/0"]
   }
+}
+resource "digitalocean_volume" "jenkins_data" {
+  name                     = "${var.droplet_name}-data"
+  region                   = var.region
+  size                     = var.volume_size_gb
+  initial_filesystem_type  = "ext4"
+  initial_filesystem_label = "jenkins-data"
+
+  lifecycle {
+    prevent_destroy = true
+  }
+}
+
+resource "digitalocean_volume_attachment" "jenkins_data" {
+  droplet_id = digitalocean_droplet.jenkins.id
+  volume_id  = digitalocean_volume.jenkins_data.id
 }

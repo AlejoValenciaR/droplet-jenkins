@@ -49,3 +49,14 @@ variable "image" {
   type    = string
   default = "ubuntu-24-04-x64"
 }
+
+variable "volume_size_gb" {
+  type        = number
+  default     = 10
+  description = "Persistent block storage size in GiB"
+}
+
+variable "volume_mount_path" {
+  type    = string
+  default = "/mnt/persist"
+}
