@@ -9,7 +9,7 @@ VOLUME_NAME="${volume_name}"
 export DEBIAN_FRONTEND=noninteractive
 
 apt-get update
-apt-get install -y ca-certificates curl gnupg nginx openssl
+apt-get install -y ca-certificates curl gnupg nginx openssl jq
 
 # ----------------------------
 # 1) Mount DigitalOcean Volume
@@ -47,7 +47,7 @@ chmod 700 "$MOUNT_PATH/ssl"
 chown -R 1000:1000 "$MOUNT_PATH/jenkins_home"
 
 # ----------------------------
-# 2) Install Docker
+# 2) Install Docker (host)
 # ----------------------------
 install -m 0755 -d /etc/apt/keyrings
 curl -fsSL https://download.docker.com/linux/ubuntu/gpg | gpg --dearmor -o /etc/apt/keyrings/docker.gpg
@@ -70,9 +70,8 @@ fi
 grep -q '^/swapfile' /etc/fstab || echo '/swapfile none swap sw 0 0' >> /etc/fstab
 
 # ----------------------------
-# 3) Reuse TLS files from volume
+# 3) Reuse TLS files from volume (self-signed if missing)
 # ----------------------------
-# Keep existing real cert/key if already present
 if [ ! -f "$MOUNT_PATH/ssl/tls.key" ]; then
   openssl genrsa -out "$MOUNT_PATH/ssl/tls.key" 2048
   chmod 600 "$MOUNT_PATH/ssl/tls.key"
@@ -100,18 +99,94 @@ ln -sf "$MOUNT_PATH/ssl/tls.crt" /etc/ssl/jenkins/tls.crt
 ln -sf "$MOUNT_PATH/ssl/tls.csr" /etc/ssl/jenkins/tls.csr
 
 # ----------------------------
-# 4) Run Jenkins with persistent home
+# 4) Build Jenkins image WITH Terraform + Git + SSH + plugins
+#    (This is the key missing piece for pipelines in Docker Jenkins)
 # ----------------------------
+mkdir -p /opt/jenkins-image
+
+cat >/opt/jenkins-image/Dockerfile <<'DOCKERFILE'
+FROM jenkins/jenkins:lts-jdk21
+
+USER root
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    ca-certificates curl gnupg lsb-release unzip \
+    git openssh-client jq \
+ && rm -rf /var/lib/apt/lists/*
+
+# Docker CLI inside Jenkins container (optional but useful for later)
+RUN install -m 0755 -d /etc/apt/keyrings \
+ && curl -fsSL https://download.docker.com/linux/debian/gpg | gpg --dearmor -o /etc/apt/keyrings/docker.gpg \
+ && chmod a+r /etc/apt/keyrings/docker.gpg \
+ && echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/debian $(. /etc/os-release && echo $VERSION_CODENAME) stable" > /etc/apt/sources.list.d/docker.list \
+ && apt-get update && apt-get install -y docker-ce-cli \
+ && rm -rf /var/lib/apt/lists/*
+
+# Terraform (HashiCorp repo)
+RUN install -m 0755 -d /etc/apt/keyrings \
+ && curl -fsSL https://apt.releases.hashicorp.com/gpg | gpg --dearmor -o /etc/apt/keyrings/hashicorp.gpg \
+ && chmod a+r /etc/apt/keyrings/hashicorp.gpg \
+ && echo "deb [signed-by=/etc/apt/keyrings/hashicorp.gpg] https://apt.releases.hashicorp.com $(. /etc/os-release && echo $VERSION_CODENAME) main" > /etc/apt/sources.list.d/hashicorp.list \
+ && apt-get update && apt-get install -y terraform \
+ && rm -rf /var/lib/apt/lists/*
+
+# Preinstall essential plugins for your use-case
+# - workflow-aggregator = Pipeline
+# - git = Git SCM
+# - github = GitHub integration + webhook endpoint
+# - credentials-binding = bind secrets to env vars
+RUN jenkins-plugin-cli --plugins \
+  "workflow-aggregator" \
+  "git" \
+  "github" \
+  "credentials-binding"
+
+USER jenkins
+DOCKERFILE
+
+# Build only if the image doesn't exist yet
+if ! docker image inspect jenkins-terraform:latest >/dev/null 2>&1; then
+  docker build -t jenkins-terraform:latest /opt/jenkins-image
+fi
+
+# ----------------------------
+# 5) Set Jenkins URL automatically (important for webhooks/reverse proxy)
+# ----------------------------
+mkdir -p "$MOUNT_PATH/jenkins_home/init.groovy.d"
+
+cat >"$MOUNT_PATH/jenkins_home/init.groovy.d/01-jenkins-url.groovy" <<EOF
+import jenkins.model.JenkinsLocationConfiguration
+
+def jlc = JenkinsLocationConfiguration.get()
+jlc.setUrl("https://$JENKINS_FQDN/")
+jlc.save()
+EOF
+
+chown -R 1000:1000 "$MOUNT_PATH/jenkins_home/init.groovy.d"
+
+# ----------------------------
+# 6) Run Jenkins with persistent home (and optional docker socket)
+# ----------------------------
+DOCKER_GID="$(getent group docker | cut -d: -f3 || true)"
+if [ -z "${DOCKER_GID:-}" ]; then
+  # fallback (common gid), but usually getent works
+  DOCKER_GID="999"
+fi
+
 docker rm -f jenkins || true
+
 docker run -d \
   --name jenkins \
   --restart unless-stopped \
   -p 127.0.0.1:8080:8080 \
+  -p 127.0.0.1:50000:50000 \
+  --group-add "$DOCKER_GID" \
   -v "$MOUNT_PATH/jenkins_home:/var/jenkins_home" \
-  jenkins/jenkins:lts-jdk21
+  -v /var/run/docker.sock:/var/run/docker.sock \
+  jenkins-terraform:latest
 
 # ----------------------------
-# 5) Nginx reverse proxy
+# 7) Nginx reverse proxy (webhooks + UI + websockets)
 # ----------------------------
 cat >/etc/nginx/sites-available/jenkins <<'NGINX'
 map $http_upgrade $connection_upgrade {
@@ -132,16 +207,24 @@ server {
   ssl_certificate     /etc/ssl/jenkins/tls.crt;
   ssl_certificate_key /etc/ssl/jenkins/tls.key;
 
+  # Helpful defaults for Jenkins
+  client_max_body_size 20m;
+
   location / {
     proxy_pass http://127.0.0.1:8080;
 
     proxy_set_header Host $host;
     proxy_set_header X-Real-IP $remote_addr;
     proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-    proxy_set_header X-Forwarded-Proto https;
+    proxy_set_header X-Forwarded-Proto $scheme;
 
+    proxy_http_version 1.1;
     proxy_set_header Upgrade $http_upgrade;
     proxy_set_header Connection $connection_upgrade;
+
+    proxy_read_timeout 300;
+    proxy_send_timeout 300;
+    proxy_buffering off;
   }
 }
 NGINX
@@ -154,3 +237,8 @@ ln -sf /etc/nginx/sites-available/jenkins /etc/nginx/sites-enabled/jenkins
 
 nginx -t
 systemctl reload nginx
+
+# ----------------------------
+# 8) Quick sanity logs (optional)
+# ----------------------------
+docker logs --tail=50 jenkins || true
