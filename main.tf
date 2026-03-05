@@ -118,8 +118,6 @@ resource "digitalocean_volume" "jenkins_data" {
   name                     = "${var.droplet_name}-data"
   region                   = var.region
   size                     = var.volume_size_gb
-  initial_filesystem_type  = "ext4"
-  initial_filesystem_label = "jenkins-data"
 
   lifecycle {
     prevent_destroy = true

@@ -32,10 +32,10 @@ mkdir -p "$MOUNT_PATH"
 
 # Format only the very first time
 if ! blkid "$VOL_DEVICE" >/dev/null 2>&1; then
-  mkfs.ext4 -F -L jenkins-data "$VOL_DEVICE"
+  mkfs.ext4 -F "$VOL_DEVICE"
 fi
 
-grep -q 'LABEL=jenkins-data' /etc/fstab || echo 'LABEL=jenkins-data /mnt/persist ext4 defaults,nofail 0 2' >> /etc/fstab
+grep -q "$VOL_DEVICE" /etc/fstab || echo "$VOL_DEVICE $MOUNT_PATH ext4 defaults,nofail 0 2" >> /etc/fstab
 systemctl daemon-reload
 mount -a
 
@@ -61,10 +61,12 @@ apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin do
 systemctl enable --now docker
 
 # small swap for tiny Droplets
-fallocate -l 1G /swapfile || dd if=/dev/zero of=/swapfile bs=1M count=1024
-chmod 600 /swapfile
-mkswap /swapfile
-swapon /swapfile
+if ! swapon --show | grep -q '/swapfile'; then
+  fallocate -l 1G /swapfile || dd if=/dev/zero of=/swapfile bs=1M count=1024
+  chmod 600 /swapfile
+  mkswap /swapfile
+  swapon /swapfile
+fi
 grep -q '^/swapfile' /etc/fstab || echo '/swapfile none swap sw 0 0' >> /etc/fstab
 
 # ----------------------------
