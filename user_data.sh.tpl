@@ -100,7 +100,6 @@ ln -sf "$MOUNT_PATH/ssl/tls.csr" /etc/ssl/jenkins/tls.csr
 
 # ----------------------------
 # 4) Build Jenkins image WITH Terraform + Git + SSH + plugins
-#    (This is the key missing piece for pipelines in Docker Jenkins)
 # ----------------------------
 mkdir -p /opt/jenkins-image
 
@@ -114,7 +113,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     git openssh-client jq \
  && rm -rf /var/lib/apt/lists/*
 
-# Docker CLI inside Jenkins container (optional but useful for later)
+# Docker CLI inside Jenkins container (optional but useful later)
 RUN install -m 0755 -d /etc/apt/keyrings \
  && curl -fsSL https://download.docker.com/linux/debian/gpg | gpg --dearmor -o /etc/apt/keyrings/docker.gpg \
  && chmod a+r /etc/apt/keyrings/docker.gpg \
@@ -130,11 +129,7 @@ RUN install -m 0755 -d /etc/apt/keyrings \
  && apt-get update && apt-get install -y terraform \
  && rm -rf /var/lib/apt/lists/*
 
-# Preinstall essential plugins for your use-case
-# - workflow-aggregator = Pipeline
-# - git = Git SCM
-# - github = GitHub integration + webhook endpoint
-# - credentials-binding = bind secrets to env vars
+# Pipeline + Git + GitHub webhook + credentials binding
 RUN jenkins-plugin-cli --plugins \
   "workflow-aggregator" \
   "git" \
@@ -150,13 +145,12 @@ if ! docker image inspect jenkins-terraform:latest >/dev/null 2>&1; then
 fi
 
 # ----------------------------
-# 5) Set Jenkins URL automatically (important for webhooks/reverse proxy)
+# 5) Set Jenkins URL automatically (important for GitHub webhooks)
 # ----------------------------
 mkdir -p "$MOUNT_PATH/jenkins_home/init.groovy.d"
 
 cat >"$MOUNT_PATH/jenkins_home/init.groovy.d/01-jenkins-url.groovy" <<EOF
 import jenkins.model.JenkinsLocationConfiguration
-
 def jlc = JenkinsLocationConfiguration.get()
 jlc.setUrl("https://$JENKINS_FQDN/")
 jlc.save()
@@ -168,8 +162,7 @@ chown -R 1000:1000 "$MOUNT_PATH/jenkins_home/init.groovy.d"
 # 6) Run Jenkins with persistent home (and optional docker socket)
 # ----------------------------
 DOCKER_GID="$(getent group docker | cut -d: -f3 || true)"
-if [ -z "${DOCKER_GID:-}" ]; then
-  # fallback (common gid), but usually getent works
+if [ -z "$DOCKER_GID" ]; then
   DOCKER_GID="999"
 fi
 
@@ -207,7 +200,6 @@ server {
   ssl_certificate     /etc/ssl/jenkins/tls.crt;
   ssl_certificate_key /etc/ssl/jenkins/tls.key;
 
-  # Helpful defaults for Jenkins
   client_max_body_size 20m;
 
   location / {
