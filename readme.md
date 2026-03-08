@@ -6,6 +6,7 @@ The Jenkins controller container is built during droplet provisioning from [user
 
 - `terraform`
 - `aws`
+- `az`
 - `docker`
 - `kubectl`
 - `sed`

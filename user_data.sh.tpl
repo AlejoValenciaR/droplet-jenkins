@@ -127,7 +127,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     git openssh-client jq sed \
   && rm -rf /var/lib/apt/lists/*
 
-# Terraform, Docker CLI, and kubectl
+# Terraform, Docker CLI, kubectl, and Azure CLI
 RUN install -m 0755 -d /etc/apt/keyrings \
  && curl -fsSL https://apt.releases.hashicorp.com/gpg | gpg --dearmor -o /etc/apt/keyrings/hashicorp.gpg \
  && chmod a+r /etc/apt/keyrings/hashicorp.gpg \
@@ -138,8 +138,11 @@ RUN install -m 0755 -d /etc/apt/keyrings \
  && curl -fsSL https://pkgs.k8s.io/core:/stable:/v1.32/deb/Release.key | gpg --dearmor -o /etc/apt/keyrings/kubernetes-apt-keyring.gpg \
  && chmod a+r /etc/apt/keyrings/kubernetes-apt-keyring.gpg \
  && echo "deb [signed-by=/etc/apt/keyrings/kubernetes-apt-keyring.gpg] https://pkgs.k8s.io/core:/stable:/v1.32/deb/ /" > /etc/apt/sources.list.d/kubernetes.list \
+ && curl -fsSL https://packages.microsoft.com/keys/microsoft.asc | gpg --dearmor -o /etc/apt/keyrings/microsoft.gpg \
+ && chmod a+r /etc/apt/keyrings/microsoft.gpg \
+ && echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/microsoft.gpg] https://packages.microsoft.com/repos/azure-cli/ $(. /etc/os-release && echo $VERSION_CODENAME) main" > /etc/apt/sources.list.d/azure-cli.list \
  && apt-get update \
- && apt-get install -y --no-install-recommends terraform docker-ce-cli kubectl \
+ && apt-get install -y --no-install-recommends terraform docker-ce-cli kubectl azure-cli \
  && rm -rf /var/lib/apt/lists/*
 
 # AWS CLI v2
