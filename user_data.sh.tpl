@@ -60,6 +60,20 @@ apt-get update
 apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
 systemctl enable --now docker
 
+for i in $(seq 1 60); do
+  if [ -S /var/run/docker.sock ]; then
+    break
+  fi
+  sleep 1
+done
+
+if [ ! -S /var/run/docker.sock ]; then
+  echo "ERROR: Docker socket not found"
+  exit 1
+fi
+
+HOST_DOCKER_GID="$(stat -c '%g' /var/run/docker.sock)"
+
 # small swap for tiny Droplets (helps stability)
 if ! swapon --show | grep -q '/swapfile'; then
   fallocate -l 1G /swapfile || dd if=/dev/zero of=/swapfile bs=1M count=1024
@@ -99,7 +113,7 @@ ln -sf "$MOUNT_PATH/ssl/tls.crt" /etc/ssl/jenkins/tls.crt
 ln -sf "$MOUNT_PATH/ssl/tls.csr" /etc/ssl/jenkins/tls.csr
 
 # ----------------------------
-# 4) Build Jenkins image WITH Terraform + plugins (OOM fix)
+# 4) Build Jenkins image WITH Terraform + CLIs + plugins (OOM fix)
 # ----------------------------
 mkdir -p /opt/jenkins-image
 
@@ -110,16 +124,31 @@ USER root
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
     ca-certificates curl gnupg lsb-release unzip \
-    git openssh-client jq \
- && rm -rf /var/lib/apt/lists/*
+    git openssh-client jq sed \
+  && rm -rf /var/lib/apt/lists/*
 
-# Terraform (HashiCorp repo)
+# Terraform, Docker CLI, and kubectl
 RUN install -m 0755 -d /etc/apt/keyrings \
  && curl -fsSL https://apt.releases.hashicorp.com/gpg | gpg --dearmor -o /etc/apt/keyrings/hashicorp.gpg \
  && chmod a+r /etc/apt/keyrings/hashicorp.gpg \
  && echo "deb [signed-by=/etc/apt/keyrings/hashicorp.gpg] https://apt.releases.hashicorp.com $(. /etc/os-release && echo $VERSION_CODENAME) main" > /etc/apt/sources.list.d/hashicorp.list \
- && apt-get update && apt-get install -y terraform \
+ && curl -fsSL https://download.docker.com/linux/debian/gpg | gpg --dearmor -o /etc/apt/keyrings/docker.gpg \
+ && chmod a+r /etc/apt/keyrings/docker.gpg \
+ && echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/debian $(. /etc/os-release && echo $VERSION_CODENAME) stable" > /etc/apt/sources.list.d/docker.list \
+ && curl -fsSL https://pkgs.k8s.io/core:/stable:/v1.32/deb/Release.key | gpg --dearmor -o /etc/apt/keyrings/kubernetes-apt-keyring.gpg \
+ && chmod a+r /etc/apt/keyrings/kubernetes-apt-keyring.gpg \
+ && echo "deb [signed-by=/etc/apt/keyrings/kubernetes-apt-keyring.gpg] https://pkgs.k8s.io/core:/stable:/v1.32/deb/ /" > /etc/apt/sources.list.d/kubernetes.list \
+ && apt-get update \
+ && apt-get install -y --no-install-recommends terraform docker-ce-cli kubectl \
  && rm -rf /var/lib/apt/lists/*
+
+# AWS CLI v2
+RUN arch="$(uname -m)" \
+ && case "$arch" in x86_64|aarch64) ;; *) echo "Unsupported arch: $arch"; exit 1 ;; esac \
+ && curl -fsSL "https://awscli.amazonaws.com/awscli-exe-linux-${arch}.zip" -o /tmp/awscliv2.zip \
+ && unzip -q /tmp/awscliv2.zip -d /tmp \
+ && /tmp/aws/install \
+ && rm -rf /tmp/aws /tmp/awscliv2.zip
 
 # IMPORTANT: increase heap for jenkins-plugin-cli so it doesn't crash on small droplets
 ENV JAVA_TOOL_OPTIONS="-Xmx768m -XX:+UseSerialGC"
@@ -142,9 +171,11 @@ docker rm -f jenkins || true
 docker run -d \
   --name jenkins \
   --restart unless-stopped \
+  --group-add "$HOST_DOCKER_GID" \
   -p 127.0.0.1:8080:8080 \
   -p 127.0.0.1:50000:50000 \
   -e JAVA_OPTS="-Xms256m -Xmx512m -XX:+UseSerialGC" \
+  -v /var/run/docker.sock:/var/run/docker.sock \
   -v "$MOUNT_PATH/jenkins_home:/var/jenkins_home" \
   jenkins-terraform:latest
 
