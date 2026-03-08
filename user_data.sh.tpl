@@ -145,7 +145,7 @@ RUN install -m 0755 -d /etc/apt/keyrings \
 # AWS CLI v2
 RUN arch="$(uname -m)" \
  && case "$arch" in x86_64|aarch64) ;; *) echo "Unsupported arch: $arch"; exit 1 ;; esac \
- && curl -fsSL "https://awscli.amazonaws.com/awscli-exe-linux-${arch}.zip" -o /tmp/awscliv2.zip \
+ && curl -fsSL "https://awscli.amazonaws.com/awscli-exe-linux-$${arch}.zip" -o /tmp/awscliv2.zip \
  && unzip -q /tmp/awscliv2.zip -d /tmp \
  && /tmp/aws/install \
  && rm -rf /tmp/aws /tmp/awscliv2.zip
