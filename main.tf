@@ -12,9 +12,11 @@ resource "digitalocean_ssh_key" "this" {
   public_key = trimspace(file("${path.module}/keys/alejo_do_ed25519.pub"))
 }
 resource "digitalocean_droplet" "jenkins" {
-  name          = var.droplet_name
-  region        = var.region
-  size          = var.size
+  name   = var.droplet_name
+  region = var.region
+  size   = var.size
+  # Keep the current root disk size when only scaling CPU/RAM.
+  resize_disk   = false
   image         = var.image
   monitoring    = true
   droplet_agent = true
@@ -115,9 +117,10 @@ resource "digitalocean_firewall" "jenkins" {
   }
 }
 resource "digitalocean_volume" "jenkins_data" {
-  name                     = "${var.droplet_name}-data"
-  region                   = var.region
-  size                     = var.volume_size_gb
+  # Keep the data volume identity independent from Droplet replacement.
+  name   = var.volume_name
+  region = var.region
+  size   = var.volume_size_gb
 
   lifecycle {
     prevent_destroy = true

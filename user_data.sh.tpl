@@ -5,18 +5,20 @@ DOMAIN_NAME="${domain_name}"
 JENKINS_FQDN="${jenkins_fqdn}"
 MOUNT_PATH="${volume_mount_path}"
 VOLUME_NAME="${volume_name}"
+DOCKER_DATA_ROOT="$MOUNT_PATH/docker"
+JENKINS_IMAGE_DIR="$MOUNT_PATH/jenkins-image"
+JENKINS_TMP_DIR="$MOUNT_PATH/jenkins-tmp"
+BOOTSTRAP_TMP_DIR="$MOUNT_PATH/bootstrap-tmp"
+SWAP_FILE="$MOUNT_PATH/swap/swapfile"
 
 export DEBIAN_FRONTEND=noninteractive
-
-apt-get update
-apt-get install -y ca-certificates curl gnupg nginx openssl jq rsync
 
 # ----------------------------
 # 1) Mount DigitalOcean Volume
 # ----------------------------
 VOL_DEVICE="/dev/disk/by-id/scsi-0DO_Volume_$VOLUME_NAME"
 
-for i in $(seq 1 180); do
+for i in $(seq 1 600); do
   if [ -b "$VOL_DEVICE" ]; then
     break
   fi
@@ -39,15 +41,31 @@ grep -q "$VOL_DEVICE" /etc/fstab || echo "$VOL_DEVICE $MOUNT_PATH ext4 defaults,
 systemctl daemon-reload
 mount -a
 
+resize2fs "$VOL_DEVICE" || true
+
 mkdir -p "$MOUNT_PATH/jenkins_home"
 mkdir -p "$MOUNT_PATH/ssl"
+mkdir -p "$DOCKER_DATA_ROOT"
+mkdir -p "$JENKINS_IMAGE_DIR"
+mkdir -p "$JENKINS_TMP_DIR"
+mkdir -p "$BOOTSTRAP_TMP_DIR"
+mkdir -p "$(dirname "$SWAP_FILE")"
 chmod 700 "$MOUNT_PATH/ssl"
+chmod 1777 "$JENKINS_TMP_DIR" "$BOOTSTRAP_TMP_DIR"
 
 # Jenkins container uses uid 1000
 chown -R 1000:1000 "$MOUNT_PATH/jenkins_home"
 
+export TMPDIR="$BOOTSTRAP_TMP_DIR"
+
 # ----------------------------
-# 2) Install Docker
+# 2) Base packages
+# ----------------------------
+apt-get update
+apt-get install -y ca-certificates curl gnupg nginx openssl jq rsync
+
+# ----------------------------
+# 3) Install Docker
 # ----------------------------
 install -m 0755 -d /etc/apt/keyrings
 curl -fsSL https://download.docker.com/linux/ubuntu/gpg | gpg --dearmor -o /etc/apt/keyrings/docker.gpg
@@ -58,7 +76,23 @@ $(. /etc/os-release && echo "$VERSION_CODENAME") stable" > /etc/apt/sources.list
 
 apt-get update
 apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
-systemctl enable --now docker
+
+systemctl stop docker.service docker.socket containerd.service || true
+
+if [ -d /var/lib/docker ] && [ -z "$(ls -A "$DOCKER_DATA_ROOT" 2>/dev/null)" ]; then
+  rsync -aHAXx --numeric-ids /var/lib/docker/ "$DOCKER_DATA_ROOT/"
+fi
+
+mkdir -p /etc/docker
+cat >/etc/docker/daemon.json <<EOF
+{
+  "data-root": "$DOCKER_DATA_ROOT"
+}
+EOF
+
+systemctl enable docker.service containerd.service
+systemctl restart containerd.service
+systemctl restart docker.service
 
 for i in $(seq 1 60); do
   if [ -S /var/run/docker.sock ]; then
@@ -74,17 +108,25 @@ fi
 
 HOST_DOCKER_GID="$(stat -c '%g' /var/run/docker.sock)"
 
-# small swap for tiny Droplets (helps stability)
-if ! swapon --show | grep -q '/swapfile'; then
-  fallocate -l 1G /swapfile || dd if=/dev/zero of=/swapfile bs=1M count=1024
-  chmod 600 /swapfile
-  mkswap /swapfile
-  swapon /swapfile
+# Keep swap on the attached volume so the boot disk is reserved for the OS.
+if swapon --show=NAME | grep -qx '/swapfile'; then
+  swapoff /swapfile || true
 fi
-grep -q '^/swapfile' /etc/fstab || echo '/swapfile none swap sw 0 0' >> /etc/fstab
+sed -i '\#^/swapfile none swap sw 0 0$#d' /etc/fstab || true
+rm -f /swapfile
+
+if ! swapon --show=NAME | grep -qx "$SWAP_FILE"; then
+  if [ ! -f "$SWAP_FILE" ]; then
+    fallocate -l 1G "$SWAP_FILE" || dd if=/dev/zero of="$SWAP_FILE" bs=1M count=1024
+    chmod 600 "$SWAP_FILE"
+    mkswap "$SWAP_FILE"
+  fi
+  swapon "$SWAP_FILE"
+fi
+grep -q "^$SWAP_FILE " /etc/fstab || echo "$SWAP_FILE none swap sw 0 0" >> /etc/fstab
 
 # ----------------------------
-# 3) Reuse TLS files from volume
+# 4) Reuse TLS files from volume
 # ----------------------------
 if [ ! -f "$MOUNT_PATH/ssl/tls.key" ]; then
   openssl genrsa -out "$MOUNT_PATH/ssl/tls.key" 2048
@@ -113,11 +155,9 @@ ln -sf "$MOUNT_PATH/ssl/tls.crt" /etc/ssl/jenkins/tls.crt
 ln -sf "$MOUNT_PATH/ssl/tls.csr" /etc/ssl/jenkins/tls.csr
 
 # ----------------------------
-# 4) Build Jenkins image WITH Terraform + CLIs + plugins (OOM fix)
+# 5) Build Jenkins image WITH Terraform + CLIs + plugins (OOM fix)
 # ----------------------------
-mkdir -p /opt/jenkins-image
-
-cat >/opt/jenkins-image/Dockerfile <<'DOCKERFILE'
+cat >"$JENKINS_IMAGE_DIR/Dockerfile" <<'DOCKERFILE'
 FROM jenkins/jenkins:lts-jdk21
 
 USER root
@@ -165,10 +205,10 @@ RUN jenkins-plugin-cli --plugins \
 USER jenkins
 DOCKERFILE
 
-docker build -t jenkins-terraform:latest /opt/jenkins-image
+docker build -t jenkins-terraform:latest "$JENKINS_IMAGE_DIR"
 
 # ----------------------------
-# 5) Run Jenkins with persistent home (limit JVM for runtime)
+# 6) Run Jenkins with persistent home (limit JVM for runtime)
 # ----------------------------
 docker rm -f jenkins || true
 docker run -d \
@@ -177,13 +217,15 @@ docker run -d \
   --group-add "$HOST_DOCKER_GID" \
   -p 127.0.0.1:8080:8080 \
   -p 127.0.0.1:50000:50000 \
-  -e JAVA_OPTS="-Xms256m -Xmx512m -XX:+UseSerialGC" \
+  -e JAVA_OPTS="-Xms256m -Xmx512m -XX:+UseSerialGC -Djava.io.tmpdir=/tmp" \
+  -e TMPDIR=/tmp \
   -v /var/run/docker.sock:/var/run/docker.sock \
   -v "$MOUNT_PATH/jenkins_home:/var/jenkins_home" \
+  -v "$JENKINS_TMP_DIR:/tmp" \
   jenkins-terraform:latest
 
 # ----------------------------
-# 6) Nginx reverse proxy
+# 7) Nginx reverse proxy
 # ----------------------------
 cat >/etc/nginx/sites-available/jenkins <<'NGINX'
 map $http_upgrade $connection_upgrade {
