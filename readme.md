@@ -24,6 +24,7 @@ Runtime persistence:
 
 - Jenkins state lives on the attached volume under `/mnt/persist/jenkins_home`, so jobs, credentials, plugins, secrets, and SSH material survive Droplet replacement.
 - Docker now stores its full `data-root` on the attached volume under `/mnt/persist/docker`, so images, containers, and named volumes created by Jenkins jobs also survive Droplet replacement.
+- During bootstrap, disposable Docker BuildKit cache under `/mnt/persist/docker/buildkit` is cleared before the Jenkins image rebuilds, which avoids stale snapshot errors after Droplet replacement.
 - Jenkins container `/tmp`, the Jenkins image build context, and the swap file are also placed on the attached volume so the 10 GB boot disk is left for Ubuntu itself.
 - The volume is protected with Terraform `prevent_destroy`, and its name is now configured independently from the Droplet name so VM replacement does not imply data-volume replacement.
 - If you are migrating an already-running Droplet that still uses `/var/lib/docker` on the boot disk, run [`scripts/migrate_docker_to_volume.sh`](scripts/migrate_docker_to_volume.sh) on that Droplet before applying a Terraform change that recreates it. That one-time step copies the existing Docker state onto the attached volume first.

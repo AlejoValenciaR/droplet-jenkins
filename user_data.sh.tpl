@@ -13,6 +13,18 @@ SWAP_FILE="$MOUNT_PATH/swap/swapfile"
 
 export DEBIAN_FRONTEND=noninteractive
 
+wait_for_docker_socket() {
+  for i in $(seq 1 60); do
+    if [ -S /var/run/docker.sock ]; then
+      return 0
+    fi
+    sleep 1
+  done
+
+  echo "ERROR: Docker socket not found"
+  return 1
+}
+
 # ----------------------------
 # 1) Mount DigitalOcean Volume
 # ----------------------------
@@ -83,6 +95,10 @@ if [ -d /var/lib/docker ] && [ -z "$(ls -A "$DOCKER_DATA_ROOT" 2>/dev/null)" ]; 
   rsync -aHAXx --numeric-ids /var/lib/docker/ "$DOCKER_DATA_ROOT/"
 fi
 
+# BuildKit cache is disposable. Clearing it during bootstrap avoids stale
+# persisted snapshots from breaking the Jenkins image rebuild on a new Droplet.
+rm -rf "$DOCKER_DATA_ROOT/buildkit" "$DOCKER_DATA_ROOT/tmp"
+
 mkdir -p /etc/docker
 cat >/etc/docker/daemon.json <<EOF
 {
@@ -94,17 +110,7 @@ systemctl enable docker.service containerd.service
 systemctl restart containerd.service
 systemctl restart docker.service
 
-for i in $(seq 1 60); do
-  if [ -S /var/run/docker.sock ]; then
-    break
-  fi
-  sleep 1
-done
-
-if [ ! -S /var/run/docker.sock ]; then
-  echo "ERROR: Docker socket not found"
-  exit 1
-fi
+wait_for_docker_socket
 
 HOST_DOCKER_GID="$(stat -c '%g' /var/run/docker.sock)"
 
@@ -205,7 +211,16 @@ RUN jenkins-plugin-cli --plugins \
 USER jenkins
 DOCKERFILE
 
-docker build -t jenkins-terraform:latest "$JENKINS_IMAGE_DIR"
+if ! docker build --pull --no-cache --progress=plain -t jenkins-terraform:latest "$JENKINS_IMAGE_DIR"; then
+  echo "Initial Jenkins image build failed. Resetting persisted BuildKit cache and retrying once."
+  systemctl stop docker.service docker.socket containerd.service || true
+  rm -rf "$DOCKER_DATA_ROOT/buildkit" "$DOCKER_DATA_ROOT/tmp"
+  systemctl start containerd.service
+  systemctl start docker.service
+  wait_for_docker_socket
+  HOST_DOCKER_GID="$(stat -c '%g' /var/run/docker.sock)"
+  docker build --pull --no-cache --progress=plain -t jenkins-terraform:latest "$JENKINS_IMAGE_DIR"
+fi
 
 # ----------------------------
 # 6) Run Jenkins with persistent home (limit JVM for runtime)
