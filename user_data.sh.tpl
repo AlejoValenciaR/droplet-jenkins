@@ -155,7 +155,7 @@ ln -sf "$MOUNT_PATH/ssl/tls.crt" /etc/ssl/jenkins/tls.crt
 ln -sf "$MOUNT_PATH/ssl/tls.csr" /etc/ssl/jenkins/tls.csr
 
 # ----------------------------
-# 5) Build Jenkins image WITH Terraform + CLIs + plugins (OOM fix)
+# 5) Build Jenkins image WITH Terraform + CLIs + Linux agent tools + plugins (OOM fix)
 # ----------------------------
 cat >"$JENKINS_IMAGE_DIR/Dockerfile" <<'DOCKERFILE'
 FROM jenkins/jenkins:lts-jdk21
@@ -163,7 +163,7 @@ FROM jenkins/jenkins:lts-jdk21
 USER root
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    ca-certificates curl gnupg lsb-release unzip \
+    bash ca-certificates curl gnupg lsb-release sshpass unzip \
     git openssh-client jq sed \
   && rm -rf /var/lib/apt/lists/*
 

@@ -2,13 +2,18 @@
 
 This repository manages DigitalOcean resources with Terraform and deploys a Jenkins controller on DigitalOcean.
 
-The Jenkins controller container is built during droplet provisioning from [user_data.sh.tpl](user_data.sh.tpl). It now includes these job-level CLI dependencies:
+The Jenkins controller container is built during droplet provisioning from [user_data.sh.tpl](user_data.sh.tpl). It acts as the Linux-based Jenkins executor for this project and includes these job-level CLI dependencies:
 
+- `bash`
+- `git`
+- `java` (OpenJDK 21 via `jenkins/jenkins:lts-jdk21`)
 - `terraform`
 - `aws`
 - `az`
 - `docker`
 - `kubectl`
+- `openssh-client`
+- `sshpass`
 - `sed`
 
 `docker` is available to Jenkins jobs because the controller container mounts the host Docker socket at `/var/run/docker.sock`.
