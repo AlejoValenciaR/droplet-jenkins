@@ -14,7 +14,7 @@ variable "admin_ip_cidr" {
 # Optional: keep DO console working by allowlisting the console IPs you observed
 variable "extra_ssh_cidrs" {
   type        = list(string)
-  default     = ["162.243.190.66", "162.243.188.66", "181.50.102.90"]
+  default     = ["0.0.0.0/0"]
   description = "Extra CIDRs allowed to SSH (optional). Example: [\"162.243.190.66/32\",\"162.243.188.66/32\"]"
 }
 
